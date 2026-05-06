@@ -2,7 +2,7 @@
 // Quest domain types — mirrors quest_example.json exactly
 // ---------------------------------------------------------------------------
 
-export type QuestType = "Global" | "Open" | "Solo";
+export type QuestType = "Global" | "Open" | "Solo" | "Daily";
 
 export type ObjectiveType =
   | "KillMob"

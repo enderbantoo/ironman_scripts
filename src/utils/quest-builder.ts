@@ -54,10 +54,10 @@ export interface QuestCsvRow {
 export const DEFAULT_LEVEL_REQ: LevelReq = { MinLevel: 1, MaxLevel: 220 };
 
 const CAP_LEVEL_RANGES: Record<number, LevelReq> = {
-  1: { MinLevel: 1,   MaxLevel: 35  },
-  2: { MinLevel: 36,  MaxLevel: 75  },
-  3: { MinLevel: 76,  MaxLevel: 135 },
-  4: { MinLevel: 136, MaxLevel: 175 },
+  1: { MinLevel: 1,   MaxLevel: 220  },
+  2: { MinLevel: 36,  MaxLevel: 220  },
+  3: { MinLevel: 76,  MaxLevel: 220 },
+  4: { MinLevel: 136, MaxLevel: 220 },
   5: { MinLevel: 176, MaxLevel: 220 },
 };
 
@@ -112,6 +112,10 @@ interface ParsedObjective {
   description: string;
   minLevel: number | null;
   maxLevel: number | null;
+  x?: number;
+  y?: number;
+  z?: number;
+  radius?: number;
 }
 
 /** Matches "(lvl 150+)" annotations in target names */
@@ -130,11 +134,12 @@ function extractTargetLevel(raw: string): { name: string; minLevel: number | nul
   };
 }
 
+const SOLO_KILL_N_RE = /^solo\s+kill\s+(\d+)\s+(.+)/i;
 const SOLO_KILL_RE = /^solo\s+kill\s+(.+)/i;
 const KILL_N_RE = /^kill\s+(\d+)\s+(.+)/i;
 const KILL_RE = /^kill\s+(.+)/i;
-const OBTAIN_N_RE = /^(?:get|obtain)\s+(\d+)\s+(.+)/i;
-const OBTAIN_RE = /^(?:get|obtain)\s+(.+)/i;
+const OBTAIN_N_RE = /^(?:get|obtain|loot)\s+(\d+)\s+(.+)/i;
+const OBTAIN_RE = /^(?:get|obtain|loot)\s+(.+)/i;
 const TRAVEL_RE = /^(?:travel|go\s+to|reach)\s+(.+)/i;
 const USE_RE = /^use\s+(.+)/i;
 const EQUIP_RE = /^equip\s+(.+)/i;
@@ -153,11 +158,21 @@ export function parseObjectiveLine(line: string): ParsedObjective {
 
   let m: RegExpMatchArray | null;
 
+  // "Solo Kill N X" → KillMob with count (must match before SOLO_KILL_RE)
+  if ((m = trimmed.match(SOLO_KILL_N_RE)) !== null) {
+    const required = parseInt(m[1] ?? "1", 10);
+    const raw = (m[2] ?? "").trim();
+    const { name, minLevel } = extractTargetLevel(raw);
+    const targets = name.split(/\s+or\s+/i).map((t) => t.trim()).filter(Boolean);
+    return { type: "KillMob", required, targets, description: raw, minLevel, maxLevel: null };
+  }
+
   // "Solo Kill X" → KillMob (solo is a quest-level property, not objective type)
   if ((m = trimmed.match(SOLO_KILL_RE)) !== null) {
     const raw = (m[1] ?? "").trim();
     const { name, minLevel } = extractTargetLevel(raw);
-    return { type: "KillMob", required: 1, targets: [name], description: raw, minLevel, maxLevel: null };
+    const targets = name.split(/\s+or\s+/i).map((t) => t.trim()).filter(Boolean);
+    return { type: "KillMob", required: 1, targets, description: raw, minLevel, maxLevel: null };
   }
 
   if ((m = trimmed.match(KILL_N_RE)) !== null) {
@@ -177,7 +192,8 @@ export function parseObjectiveLine(line: string): ParsedObjective {
   if ((m = trimmed.match(KILL_RE)) !== null) {
     const raw = (m[1] ?? "").trim();
     const { name, minLevel } = extractTargetLevel(raw);
-    return { type: "KillMob", required: 1, targets: [name], description: raw, minLevel, maxLevel: null };
+    const targets = name.split(/\s+or\s+/i).map((t) => t.trim()).filter(Boolean);
+    return { type: "KillMob", required: 1, targets, description: raw, minLevel, maxLevel: null };
   }
 
   if ((m = trimmed.match(OBTAIN_N_RE)) !== null) {
@@ -208,8 +224,16 @@ export function parseObjectiveLine(line: string): ParsedObjective {
   }
 
   if ((m = trimmed.match(TRAVEL_RE)) !== null) {
-    const dest = (m[1] ?? "").trim();
-    return { type: "ReachDestination", required: 1, targets: [], description: dest, minLevel: null, maxLevel: null };
+    // Coords format: "Travel to Place - X, Z, Y" where input order is X, Z, Y
+    const coordMatch = trimmed.match(/^(.+?)\s*-\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)$/);
+    if (coordMatch) {
+      const description = (coordMatch[1] ?? "").trim();
+      const x = parseFloat(coordMatch[2] ?? "0");
+      const z = parseFloat(coordMatch[3] ?? "0");
+      const y = parseFloat(coordMatch[4] ?? "0");
+      return { type: "ReachDestination", required: 1, targets: [], description, minLevel: null, maxLevel: null, x, y, z, radius: 5.0 };
+    }
+    return { type: "ReachDestination", required: 1, targets: [], description: trimmed, minLevel: null, maxLevel: null };
   }
 
   // Unrecognized pattern — store raw text, caller can handle
@@ -260,13 +284,9 @@ export function parsePlayfieldIds(raw: string): number[] | null {
  * Converts a raw multiline objectives string into ObjectiveDefinition[].
  *
  * PlayfieldIds per objective are resolved in priority order:
- *  1. maps.mobPlayfields lookup for the objective's target (most specific)
- *  2. questPlayfieldIds inherited from the parent quest (fallback)
- *  3. null (no location data)
  */
 export function buildObjectives(
   raw: string,
-  questPlayfieldIds: number[] | null,
   maps?: DataMaps
 ): ObjectiveDefinition[] {
   return raw
@@ -292,25 +312,19 @@ export function buildObjectives(
         } satisfies ObjectiveDefinition;
       }
 
-      // Resolve playfield IDs for other types: mob map > quest-level fallback
-      let playfieldIds: number[] | null = questPlayfieldIds;
-      if (maps?.mobPlayfields && parsed.targets.length > 0) {
-        const firstTarget = parsed.targets[0];
-        const mobIds = firstTarget !== undefined ? maps.mobPlayfields[firstTarget] : undefined;
-        if (mobIds !== undefined) {
-          playfieldIds = mobIds;
-        }
-      }
-
       return {
         ObjectiveId: generateId(parsed.type.toLowerCase()),
         Type: parsed.type,
         Description: parsed.description,
         Required: parsed.required,
-        PlayfieldIds: playfieldIds,
+        PlayfieldIds: null,
         Targets: parsed.targets,
         MinLevel: parsed.minLevel ?? null,
         MaxLevel: parsed.maxLevel ?? null,
+        ...(parsed.x !== undefined && { X: parsed.x }),
+        ...(parsed.y !== undefined && { Y: parsed.y }),
+        ...(parsed.z !== undefined && { Z: parsed.z }),
+        ...(parsed.radius !== undefined && { Radius: parsed.radius }),
       } satisfies ObjectiveDefinition;
     });
 }
@@ -326,8 +340,6 @@ export function buildObjectives(
  * @param maps  - Optional lookup tables to enrich the output
  */
 export function questFromCsvRow(row: QuestCsvRow, maps?: DataMaps): Quest {
-  const playfieldIds = parsePlayfieldIds(row.playfieldRaw);
-
   // "All" in CSV → "None" in quest schema (no profession restriction)
   const profReq = row.profReq.toLowerCase() === "all" ? "None" : row.profReq;
 
@@ -338,8 +350,9 @@ export function questFromCsvRow(row: QuestCsvRow, maps?: DataMaps): Quest {
   const questId = maps?.questIds?.[row.title] ?? buildQuestId(questType, row.cap, row.title);
 
   const reward: Reward = {};
-  if (row.ironCoins > 0) {
-    reward.Coins = { [row.coinType]: row.ironCoins };
+  const coinAmount = row.ironCoins > 0 ? row.ironCoins : questType === "Daily" ? row.cap * 100 : 0;
+  if (coinAmount > 0) {
+    reward.Coins = { [row.coinType]: coinAmount };
   }
 
   return {
@@ -355,7 +368,7 @@ export function questFromCsvRow(row: QuestCsvRow, maps?: DataMaps): Quest {
     UnlockCode: row.cap,
     PrerequisiteQuests: [],
     NextQuestInChain: null,
-    ObjectiveDefinitions: buildObjectives(row.objectivesRaw, playfieldIds, maps),
+    ObjectiveDefinitions: buildObjectives(row.objectivesRaw, maps),
     Reward: reward,
   };
 }
@@ -388,14 +401,21 @@ export function questsFromCsv(csvText: string, maps?: DataMaps): Quest[] {
   const sep = firstLine.includes("\t") ? "\t" : ",";
   const records = parseCsv(csvText, sep);
 
-  // Files with an "All/Prof" column contain Open/Solo quests; others are Global.
-  const isGlobalFile = records.length === 0 || !("All/Prof" in (records[0] ?? {}));
+  const firstRecord = records[0] ?? {};
+  const hasAllProf = "All/Prof" in firstRecord;
+  const hasIronChips = "Iron Chips" in firstRecord;
+  // Files with All/Prof are Open/Solo; Iron Chips column means Daily; otherwise Global.
+  const defaultQuestType: Quest["Type"] | undefined = hasAllProf
+    ? undefined
+    : hasIronChips
+    ? "Daily"
+    : "Global";
 
   return records
     .filter((r) => (r["Quest Name"] ?? "").trim() !== "")
     .map((r): Quest => {
       const capRaw = r["Level Cap"] ?? r["Level"] ?? "0";
-      const hasIronChips = "Iron Chips" in r;
+      const rowHasIronChips = "Iron Chips" in r;
       const rewardRaw = r["Quest Reward / Iron Coin"] ?? r["Reward"] ?? r["Iron Chips"] ?? "0";
 
       const csvRow: QuestCsvRow = {
@@ -404,11 +424,11 @@ export function questsFromCsv(csvText: string, maps?: DataMaps): Quest[] {
         title: (r["Quest Name"] ?? "").trim(),
         objectivesRaw: (r["Quest Description"] ?? "").trim(),
         ironCoins: parseInt(rewardRaw.trim(), 10) || 0,
-        coinType: hasIronChips ? "IronChip" : "IronCoin",
+        coinType: rowHasIronChips ? "IronChip" : "IronCoin",
         description: (r["Description"] ?? "").trim(),
         playfieldRaw: (r["LocationID"] ?? "").trim(),
         zone: (r["Location"] ?? "").trim(),
-        ...(isGlobalFile && { questType: "Global" }),
+        ...(defaultQuestType && { questType: defaultQuestType }),
       };
       return questFromCsvRow(csvRow, maps);
     });
