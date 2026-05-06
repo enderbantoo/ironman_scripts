@@ -1,0 +1,50 @@
+{
+    "QuestId": "unnamed-7fe1",
+    "Title": "",
+    "Description": "",
+    "Type": "Open",
+    "ProfReq": "None",
+    "LevelReq": {
+        "MinLevel": 1,
+        "MaxLevel": 220
+    },
+    "IsRepeatable": false,
+    "RepeatCooldown": null,
+    "TimeLimit": null,
+    "UnlockCode": null,
+    "PrerequisiteQuests": [],
+    "NextQuestInChain": null,
+    "ObjectiveDefinitions": [
+        {
+            "ObjectiveId": "killmob-378d",
+            "Type": "KillMob",
+            "Description": "Callous Mortiig",
+            "Required": 35,
+            "PlayfieldIds": [
+                4540
+            ],
+            "Targets": [
+                "Callous Mortiig"
+            ],
+            "MinLevel": null,
+            "MaxLevel": null
+        },
+        {
+            "ObjectiveId": "killmob-28ef",
+            "Type": "KillMob",
+            "Description": "Inicha",
+            "Required": 1,
+            "PlayfieldIds": null,
+            "Targets": [
+                "Inicha"
+            ],
+            "MinLevel": null,
+            "MaxLevel": null
+        }
+    ],
+    "Reward": {
+        "Coins": {
+            "IronCoin": 1
+        }
+    }
+}

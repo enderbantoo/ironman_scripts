@@ -1,0 +1,21 @@
+{
+  "name": "scripts",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "example": "tsx src/example.ts",
+    "csv-to-json": "tsx src/csv-to-json.ts",
+    "quests-csv-to-json": "tsx src/quests-csv-to-json.ts",
+    "quests-csv-to-json-testing": "tsx src/quests-csv-to-json-testing.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}
